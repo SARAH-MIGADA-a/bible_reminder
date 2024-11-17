@@ -1,0 +1,26 @@
+name: bible_reminder_app
+description: A new Bible Reminder App
+
+# The following line prevents errors when the package is published to the Flutter package site.
+publish_to: 'none' # Remove this line if you are publishing your package.
+
+environment:
+  sdk: ">=2.19.0 <3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  shared_preferences: ^2.1.0
+  flutter_local_notifications: ^18.0.1
+  flutter_launcher_icons: ^0.9.2
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/icon/app_icon.png
