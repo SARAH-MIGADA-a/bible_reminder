@@ -11,12 +11,27 @@ void main() {
 class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
+    final ThemeData theme = ThemeData(
+      primarySwatch: Colors.blue,
+      visualDensity: VisualDensity.adaptivePlatformDensity,
+      textTheme: TextTheme(
+        bodyLarge: TextStyle(fontSize: 16, color: Colors.black),
+        bodyMedium: TextStyle(fontSize: 14, color: Colors.black54),
+        titleLarge: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black87),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          padding: EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+    );
+
     return MaterialApp(
       title: 'Bible Reminder App',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-        visualDensity: VisualDensity.adaptivePlatformDensity,
-      ),
+      theme: theme,
       home: HomeScreen(),
     );
   }
@@ -31,26 +46,24 @@ class _HomeScreenState extends State<HomeScreen> {
   final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
   FlutterLocalNotificationsPlugin();
   final TextEditingController reminderController = TextEditingController();
-  final String verseOfTheDay = "John 3:16 - For God so loved the world...";
+  String verseOfTheDay = "John 3:16 - For God so loved the world...";
+  DateTime? selectedDate;
+  TimeOfDay? selectedTime;
 
   @override
   void initState() {
     super.initState();
-    tz.initializeTimeZones(); // Initialize timezone data
+    tz.initializeTimeZones();
     _initializeNotifications();
     _loadReminder();
   }
 
-  // Initialize notifications
   void _initializeNotifications() {
     const androidSettings = AndroidInitializationSettings('app_icon');
-    const initializationSettings =
-    InitializationSettings(android: androidSettings);
-
+    const initializationSettings = InitializationSettings(android: androidSettings);
     flutterLocalNotificationsPlugin.initialize(initializationSettings);
   }
 
-  // Load reminder time from shared preferences
   Future<void> _loadReminder() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
@@ -58,27 +71,52 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  // Save reminder time and schedule notification
   Future<void> _saveReminder() async {
-    final reminderTime = reminderController.text.trim();
+    if (selectedDate == null || selectedTime == null) {
+      _showSnackbar("Please select both date and time.");
+      return;
+    }
 
-    if (_validateTime(reminderTime)) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('reminder_time', reminderTime);
+    final String reminderTime =
+        '${selectedDate!.toLocal().toString().split(' ')[0]} ${selectedTime!.format(context)}';
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('reminder_time', reminderTime);
 
-      final parsedTime = _parseTime(reminderTime);
-      if (parsedTime != null) {
-        _scheduleDailyReminder(parsedTime);
-        _showSnackbar("Reminder set for $reminderTime");
-      } else {
-        _showSnackbar("Invalid time. Please try again.");
-      }
+    final parsedTime = _parseTime(reminderTime);
+    if (parsedTime != null) {
+      _scheduleDailyReminder(parsedTime);
+      _showSnackbar("Reminder set for $reminderTime");
     } else {
-      _showSnackbar("Invalid format. Use 'hh:mm AM/PM'.");
+      _showSnackbar("Invalid time format.");
     }
   }
 
-  // Schedule a daily reminder notification
+  tz.TZDateTime? _parseTime(String timeString) {
+    try {
+      final dateParts = timeString.split(' ');
+      final date = DateTime.parse(dateParts[0]);
+      final timeParts = dateParts[1].split(':');
+      final hour = int.parse(timeParts[0]);
+      final minute = int.parse(timeParts[1].substring(0, 2));
+      final isPM = timeParts[1].contains('PM');
+
+      final scheduledTime = tz.TZDateTime(
+        tz.local,
+        date.year,
+        date.month,
+        date.day,
+        isPM ? (hour + 12) % 24 : hour,
+        minute,
+      );
+
+      return scheduledTime.isBefore(tz.TZDateTime.now(tz.local))
+          ? scheduledTime.add(const Duration(days: 1))
+          : scheduledTime;
+    } catch (e) {
+      return null;
+    }
+  }
+
   void _scheduleDailyReminder(tz.TZDateTime time) {
     flutterLocalNotificationsPlugin.zonedSchedule(
       0,
@@ -87,9 +125,9 @@ class _HomeScreenState extends State<HomeScreen> {
       time,
       const NotificationDetails(
         android: AndroidNotificationDetails(
-          'bible_reminder_channel', // Channel ID
-          'Bible Reminder Notifications', // Channel Name
-          channelDescription: 'Daily Bible verse reminder', // Description
+          'bible_reminder_channel',
+          'Bible Reminder Notifications',
+          channelDescription: 'Daily Bible verse reminder',
           importance: Importance.max,
           priority: Priority.high,
         ),
@@ -100,83 +138,279 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Parse time string to a TZDateTime object
-  tz.TZDateTime? _parseTime(String timeString) {
-    try {
-      final timeParts = timeString.split(':');
-      int hour = int.parse(timeParts[0]);
-      final minute = int.parse(timeParts[1].split(' ')[0]);
-      final isPM = timeString.contains('PM');
-
-      if (isPM && hour < 12) hour += 12;
-      if (!isPM && hour == 12) hour = 0;
-
-      final now = tz.TZDateTime.now(tz.local);
-      final scheduledTime = tz.TZDateTime(
-        tz.local,
-        now.year,
-        now.month,
-        now.day,
-        hour,
-        minute,
-      );
-
-      // If scheduled time is earlier than now, schedule for the next day
-      return scheduledTime.isBefore(now)
-          ? scheduledTime.add(const Duration(days: 1))
-          : scheduledTime;
-    } catch (e) {
-      return null; // Return null for invalid input
-    }
-  }
-
-  // Validate user input time format
-  bool _validateTime(String time) {
-    final regex = RegExp(r'^\d{1,2}:\d{2} (AM|PM)$');
-    return regex.hasMatch(time);
-  }
-
-  // Show a snackbar for user feedback
   void _showSnackbar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message)),
     );
   }
 
+  Future<void> _selectDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: selectedDate ?? DateTime.now(),
+      firstDate: DateTime(2023),
+      lastDate: DateTime(2101),
+    );
+    if (picked != null && picked != selectedDate)
+      setState(() {
+        selectedDate = picked;
+      });
+  }
+
+  Future<void> _selectTime(BuildContext context) async {
+    final TimeOfDay? picked = await showTimePicker(
+      context: context,
+      initialTime: selectedTime ?? TimeOfDay.now(),
+    );
+    if (picked != null && picked != selectedTime)
+      setState(() {
+        selectedTime = picked;
+      });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Bible Reminder App'),
+        title: const Text(
+          'Bible Reminder App',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 22,
+          ),
+        ),
+        centerTitle: true,
+        backgroundColor: Colors.blue[700],
+        elevation: 0,
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              "Verse of the Day",
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Colors.blue[700]!, Colors.white],
+            stops: [0.0, 0.3],
+          ),
+        ),
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(24.0),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20.0),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        spreadRadius: 1,
+                        blurRadius: 10,
+                        offset: Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.menu_book,
+                            color: Colors.blue[700],
+                            size: 28,
+                          ),
+                          SizedBox(width: 12),
+                          Text(
+                            "Verse of the Day",
+                            style: Theme.of(context).textTheme.titleLarge!.copyWith(
+                              color: Colors.blue[700],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        verseOfTheDay,
+                        style: TextStyle(
+                          fontSize: 18,
+                          height: 1.5,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Container(
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20.0),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        spreadRadius: 1,
+                        blurRadius: 10,
+                        offset: Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(24.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.notifications_active,
+                              color: Colors.blue[700],
+                              size: 28,
+                            ),
+                            SizedBox(width: 12),
+                            Text(
+                              "Set Reminder",
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleLarge!
+                                  .copyWith(
+                                color: Colors.blue[700],
+                                fontSize: 22,
+                              ),
+                            ),
+                          ],
+                        ),
+                        SizedBox(height: 24),
+                        Container(
+                          decoration: BoxDecoration(
+                            color: Colors.grey[100],
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: TextButton(
+                            onPressed: () => _selectDate(context),
+                            style: TextButton.styleFrom(
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: 20, vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Row(
+                                  children: [
+                                    Icon(
+                                      Icons.calendar_today,
+                                      color: Colors.blue[700],
+                                    ),
+                                    SizedBox(width: 12),
+                                    Text(
+                                      selectedDate == null
+                                          ? 'Select Date'
+                                          : 'Date: ${selectedDate!.toLocal().toString().split(' ')[0]}',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        color: Colors.black87,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                Icon(
+                                  Icons.arrow_forward_ios,
+                                  size: 16,
+                                  color: Colors.blue[700],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        SizedBox(height: 16),
+                        Container(
+                          decoration: BoxDecoration(
+                            color: Colors.grey[100],
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: TextButton(
+                            onPressed: () => _selectTime(context),
+                            style: TextButton.styleFrom(
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: 20, vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Row(
+                                  children: [
+                                    Icon(
+                                      Icons.access_time,
+                                      color: Colors.blue[700],
+                                    ),
+                                    SizedBox(width: 12),
+                                    Text(
+                                      selectedTime == null
+                                          ? 'Select Time'
+                                          : 'Time: ${selectedTime!.format(context)}',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        color: Colors.black87,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                Icon(
+                                  Icons.arrow_forward_ios,
+                                  size: 16,
+                                  color: Colors.blue[700],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        SizedBox(height: 24),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: _saveReminder,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.blue[700],
+                              padding: EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              elevation: 2,
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.save, color: Colors.white),
+                                SizedBox(width: 12),
+                                Text(
+                                  'Save Reminder',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 10),
-            Text(
-              verseOfTheDay,
-              style: const TextStyle(fontSize: 18),
-            ),
-            const SizedBox(height: 20),
-            TextField(
-              controller: reminderController,
-              decoration: const InputDecoration(
-                labelText: 'Set Reminder Time (e.g., 8:00 AM)',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: _saveReminder,
-              child: const Text('Save Reminder'),
-            ),
-          ],
+          ),
         ),
       ),
     );
